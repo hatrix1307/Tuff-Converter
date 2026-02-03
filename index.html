@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Pack Mixer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; padding: 50px; background: #222; color: #fff; }
+        .container { background: #333; padding: 40px; border-radius: 12px; display: inline-block; max-width: 500px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        h2 { margin-top: 0; }
+        .upload-box { border: 2px dashed #555; padding: 20px; margin: 20px 0; border-radius: 8px; }
+        button { background: #4CAF50; color: white; padding: 12px 24px; border: none; cursor: pointer; font-size: 16px; border-radius: 4px; transition: background 0.3s; }
+        button:hover { background: #45a049; }
+        button:disabled { background: #555; cursor: wait; }
+        #status { margin-top: 20px; color: #aaa; font-size: 14px; min-height: 20px; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h2>Pack Mixer (1.12.2)</h2>
+        <p>Upload your pack. We will merge your textures into our Base Pack instantly.</p>
+        
+        <div class="upload-box">
+            <input type="file" id="packInput" accept=".zip">
+        </div>
+
+        <button id="btn">Mix & Download</button>
+        <p id="status"></p>
+    </div>
+
+    <script>
+        const btn = document.getElementById('btn');
+        const status = document.getElementById('status');
+        const fileInput = document.getElementById('packInput');
+
+        btn.addEventListener('click', async () => {
+            if (fileInput.files.length === 0) {
+                alert("Please select a file first.");
+                return;
+            }
+
+            try {
+                // UI Updates
+                btn.disabled = true;
+                btn.innerText = "Processing...";
+                status.innerText = "Loading Base Pack...";
+
+                // 1. Load the Base Pack from the server (your website)
+                const baseResponse = await fetch('./base-pack.zip');
+                if (!baseResponse.ok) throw new Error("Could not find base-pack.zip");
+                const baseBlob = await baseResponse.blob();
+                
+                // 2. Initialize JSZip
+                const baseZip = await JSZip.loadAsync(baseBlob);
+                const userZip = await JSZip.loadAsync(fileInput.files[0]);
+
+                status.innerText = "Cleaning Base Pack...";
+
+                // 3. Remove /assets/minecraft from Base Pack
+                // We must find all files matching that path and remove them
+                const filesToRemove = [];
+                baseZip.forEach((relativePath) => {
+                    if (relativePath.startsWith('assets/minecraft/')) {
+                        filesToRemove.push(relativePath);
+                    }
+                });
+                filesToRemove.forEach((path) => baseZip.remove(path));
+
+                status.innerText = "Injecting your textures...";
+
+                // 4. Copy /assets/minecraft from User Pack to Base Pack
+                const promises = [];
+                userZip.forEach((relativePath, file) => {
+                    if (relativePath.startsWith('assets/minecraft/')) {
+                        // We read the file data and add it to the base zip
+                        const contentPromise = file.async('arraybuffer').then((content) => {
+                            baseZip.file(relativePath, content);
+                        });
+                        promises.push(contentPromise);
+                    }
+                });
+
+                // Wait for all files to be copied
+                await Promise.all(promises);
+
+                status.innerText = "Zipping final result...";
+
+                // 5. Generate the new Zip
+                const content = await baseZip.generateAsync({ type: "blob" });
+
+                // 6. Trigger Download
+                const url = window.URL.createObjectURL(content);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "mixed-pack.zip";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+
+                status.innerText = "Done! Download started.";
+
+            } catch (err) {
+                console.error(err);
+                status.innerText = "Error: " + err.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Mix & Download";
+            }
+        });
+    </script>
+</body>
+</html>
