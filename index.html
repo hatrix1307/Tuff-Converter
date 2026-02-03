@@ -43,39 +43,41 @@
             }
 
             try {
-                // UI Updates
                 btn.disabled = true;
                 btn.innerText = "Processing...";
                 status.innerText = "Loading Base Pack...";
 
-                // 1. Load the Base Pack from the server (your website)
+                // 1. Load the Base Pack
                 const baseResponse = await fetch('./base-pack.zip');
                 if (!baseResponse.ok) throw new Error("Could not find base-pack.zip");
                 const baseBlob = await baseResponse.blob();
                 
-                // 2. Initialize JSZip
                 const baseZip = await JSZip.loadAsync(baseBlob);
                 const userZip = await JSZip.loadAsync(fileInput.files[0]);
 
                 status.innerText = "Cleaning Base Pack...";
 
-                // 3. Remove /assets/minecraft from Base Pack
-                // We must find all files matching that path and remove them
-                const filesToRemove = [];
+                // 2. Remove /assets/minecraft AND any junk from Base Pack
+                const baseFilesToRemove = [];
                 baseZip.forEach((relativePath) => {
-                    if (relativePath.startsWith('assets/minecraft/')) {
-                        filesToRemove.push(relativePath);
+                    if (relativePath.startsWith('assets/minecraft/') || 
+                        relativePath.includes('__MACOSX') || 
+                        relativePath.includes('.DS_Store')) {
+                        baseFilesToRemove.push(relativePath);
                     }
                 });
-                filesToRemove.forEach((path) => baseZip.remove(path));
+                baseFilesToRemove.forEach((path) => baseZip.remove(path));
 
-                status.innerText = "Injecting your textures...";
+                status.innerText = "Injecting your textures (cleaning junk)...";
 
-                // 4. Copy /assets/minecraft from User Pack to Base Pack
+                // 3. Copy from User Pack, skipping macOS junk
                 const promises = [];
                 userZip.forEach((relativePath, file) => {
-                    if (relativePath.startsWith('assets/minecraft/')) {
-                        // We read the file data and add it to the base zip
+                    // Only process if it's in assets/minecraft AND NOT macOS junk
+                    const isMinecraftAsset = relativePath.startsWith('assets/minecraft/');
+                    const isJunk = relativePath.includes('__MACOSX') || relativePath.includes('.DS_Store');
+
+                    if (isMinecraftAsset && !isJunk) {
                         const contentPromise = file.async('arraybuffer').then((content) => {
                             baseZip.file(relativePath, content);
                         });
@@ -83,15 +85,18 @@
                     }
                 });
 
-                // Wait for all files to be copied
                 await Promise.all(promises);
 
-                status.innerText = "Zipping final result...";
+                status.innerText = "Generating clean zip...";
 
-                // 5. Generate the new Zip
-                const content = await baseZip.generateAsync({ type: "blob" });
+                // 4. Generate the new Zip (Compression level 6 is a good balance)
+                const content = await baseZip.generateAsync({ 
+                    type: "blob",
+                    compression: "DEFLATE",
+                    compressionOptions: { level: 6 }
+                });
 
-                // 6. Trigger Download
+                // 5. Trigger Download
                 const url = window.URL.createObjectURL(content);
                 const a = document.createElement('a');
                 a.href = url;
@@ -101,7 +106,7 @@
                 a.remove();
                 window.URL.revokeObjectURL(url);
 
-                status.innerText = "Done! Download started.";
+                status.innerText = "Done! Junk folders removed.";
 
             } catch (err) {
                 console.error(err);
